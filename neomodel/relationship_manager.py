@@ -163,6 +163,42 @@ class RelationshipManager(Traversal):
         nodes = self[0]
         return nodes[0] if nodes else None
 
+    @check_source
+    def create_or_update_connection(self, obj, properties=None):
+        return self.connect(obj, properties)
+
+
+    @check_source
+    def create_new_connection(self, obj, properties=None):
+        self._check_node(obj)
+
+        if not self.definition['model'] and properties:
+            raise NotImplementedError("Relationship properties without " +
+                                      "using a relationship model is no longer supported")
+
+        new_rel = rel_helper(lhs='us', rhs='them', ident='r', **self.definition)
+        q = "MATCH them, us WHERE id(them)={them} and id(us)={self} " \
+            "CREATE" + new_rel
+        params = {'them': obj._id}
+
+        if not properties and not self.definition['model']:
+            self.source.cypher(q, params)
+            return True
+
+        rel_model = self.definition['model']
+        # need to generate defaults etc to create fake instance
+        tmp = rel_model(**properties) if properties else rel_model()
+
+        for p, v in rel_model.deflate(tmp.__properties__).items():
+            params['place_holder_' + p] = v
+            q += " SET r." + p + " = {place_holder_" + p + "}"
+
+        rel_ = self.source.cypher(q + " RETURN r", params)[0][0][0]
+        rel_instance = self._set_start_end_cls(rel_model.inflate(rel_), obj)
+        # print(rel_, rel_instance)
+        # self.source.cypher(q, params)
+        return rel_instance
+
 
 class RelationshipDefinition(object):
     def __init__(self, relation_type, cls_name, direction, manager=RelationshipManager, model=None):
